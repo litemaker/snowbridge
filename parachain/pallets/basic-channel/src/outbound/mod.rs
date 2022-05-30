@@ -12,6 +12,7 @@ use frame_support::{
 	dispatch::DispatchResult,
 	ensure,
 	traits::{EnsureOrigin, Get},
+	BoundedVec,
 };
 use scale_info::TypeInfo;
 use sp_core::{RuntimeDebug, H160, H256};
@@ -26,19 +27,19 @@ pub use weights::WeightInfo;
 
 /// Wire-format for committed messages
 #[derive(Encode, Decode, Clone, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct MessageBundle {
+pub struct MessageBundle<T: Get<u32>> {
 	nonce: u64,
-	messages: Vec<Message>,
+	messages: Vec<Message<T>>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct Message {
+pub struct Message<T: Get<u32>> {
 	/// Unique message ID
 	id: u64,
 	/// Target application on the Ethereum side.
 	target: H160,
 	/// Payload for target application.
-	payload: Vec<u8>,
+	payload: BoundedVec<u8, T>,
 }
 
 pub use pallet::*;
@@ -67,7 +68,7 @@ pub mod pallet {
 
 		/// Max bytes in a message payload
 		#[pallet::constant]
-		type MaxMessagePayloadSize: Get<u64>;
+		type MaxMessagePayloadSize: Get<u32>;
 
 		/// Max number of messages per commitment
 		#[pallet::constant]
@@ -105,7 +106,7 @@ pub mod pallet {
 	/// Messages waiting to be committed.
 	#[pallet::storage]
 	pub(super) type MessageQueue<T: Config> =
-		StorageValue<_, BoundedVec<Message, T::MaxMessagesPerCommit>, ValueQuery>;
+		StorageValue<_, BoundedVec<Message<T::MaxMessagePayloadSize>, T::MaxMessagesPerCommit>, ValueQuery>;
 
 	/// Fee for accepting a message
 	#[pallet::storage]
@@ -189,12 +190,14 @@ pub mod pallet {
 				return Err(Error::<T>::Overflow.into());
 			}
 
+			let bounded_payload = BoundedVec::try_from(payload.to_vec())
+				.map_err(|_| Error::<T>::PayloadTooLarge)?;
 			<MessageQueue<T>>::try_append(Message {
 				id: next_id,
 				target,
-				payload: payload.to_vec(),
+				payload: bounded_payload,
 			})
-			.map_err(|_| Error::<T>::QueueSizeLimitReached)?;
+				.map_err(|_| Error::<T>::QueueSizeLimitReached)?;
 			Self::deposit_event(Event::MessageAccepted(next_id));
 
 			<NextId<T>>::put(next_id + 1);
@@ -203,7 +206,7 @@ pub mod pallet {
 		}
 
 		fn commit() -> Weight {
-			let messages: BoundedVec<Message, T::MaxMessagesPerCommit> = <MessageQueue<T>>::take();
+			let messages: BoundedVec<Message<T::MaxMessagePayloadSize>, T::MaxMessagesPerCommit> = <MessageQueue<T>>::take();
 			if messages.is_empty() {
 				return T::WeightInfo::on_initialize_no_messages();
 			}
@@ -228,7 +231,7 @@ pub mod pallet {
 			T::WeightInfo::on_initialize(messages.len() as u32, average_payload_size as u32)
 		}
 
-		fn make_commitment_hash(bundle: &MessageBundle) -> H256 {
+		fn make_commitment_hash(bundle: &MessageBundle<T::MaxMessagePayloadSize>) -> H256 {
 			let messages: Vec<Token> = bundle
 				.messages
 				.iter()
@@ -236,7 +239,7 @@ pub mod pallet {
 					Token::Tuple(vec![
 						Token::Uint(message.id.into()),
 						Token::Address(message.target),
-						Token::Bytes(message.payload.clone()),
+						Token::Bytes(message.payload.to_vec()),
 					])
 				})
 				.collect();
@@ -247,7 +250,7 @@ pub mod pallet {
 			<T as Config>::Hashing::hash(&input)
 		}
 
-		fn average_payload_size(messages: &[Message]) -> usize {
+		fn average_payload_size(messages: &[Message<T::MaxMessagePayloadSize>]) -> usize {
 			let sum: usize = messages.iter().fold(0, |acc, x| acc + x.payload.len());
 			// We overestimate message payload size rather than underestimate.
 			// So add 1 here to account for integer division truncation.
