@@ -142,9 +142,12 @@ pub mod pallet {
 	pub(super) type FinalizedBeaconHeaders<T: Config> =
 		StorageMap<_, Identity, H256, BeaconHeader, OptionQuery>;
 
-	#[pallet::storage]
-	pub(super) type BeaconHeaders<T: Config> =
+	pub(super) type FinalizedBeaconHeaders<T: Config> =
 		StorageMap<_, Identity, H256, BeaconHeader, OptionQuery>;
+
+	#[pallet::storage]
+	pub(super) type ExecutionHeaders<T: Config> =
+		StorageMap<_, Identity, H256, ExecutionHeader, OptionQuery>;
 
 	#[pallet::storage]
 	pub(super) type ExecutionHeaders<T: Config> =
@@ -307,6 +310,21 @@ pub mod pallet {
 				"💫 Header processing and importing execution header {} at beacon slot {} succeeded.",
 				block_hash,
 				slot
+			);
+
+			Ok(())
+		}
+
+		#[pallet::weight(1_000_000)]
+		#[transactional]
+		pub fn verify_eth1_receipt_inclusion(
+			origin: OriginFor<T>,
+		) -> DispatchResult {
+			let _sender = ensure_signed(origin)?;
+
+			log::trace!(
+				target: "ethereum-beacon-light-client",
+				"💫 Received transaction to be validated.",
 			);
 
 			Ok(())
