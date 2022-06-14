@@ -52,30 +52,6 @@ pub fn get_ssz_execution_payload(execution_payload: ExecutionPayload) -> Result<
     Ok(ssz_execution_payload)
 }
 
-impl TryFrom<Deposit> for SSZDeposit {
-    type Error = MerkleizationError;
-
-    fn try_from(value: Deposit) -> Result<Self, Self::Error> {
-        let mut proofs = Vec::new();
-
-        for proof in value.proof.iter() {
-            proofs.push(proof.as_bytes().try_into().map_err(|_| MerkleizationError::InvalidLength)?,)
-        }
-
-        let proofs_conv = Vector::<[u8; 32], {config::DEPOSIT_CONTRACT_TREE_DEPTH + 1}>::from_iter(proofs);
-
-        return Ok(SSZDeposit{
-            proof: proofs_conv,
-            data: SSZDepositData {
-                pubkey: Vector::<u8, 48>::from_iter(value.data.pubkey.clone()),
-                withdrawal_credentials: value.data.withdrawal_credentials.as_bytes().try_into().map_err(|_| MerkleizationError::InvalidLength)?,
-                amount: value.data.amount,
-                signature: Vector::<u8, 96>::from_iter(value.data.signature.clone()),
-            }
-        })
-    }
-}
-
 pub fn get_ssz_deposits(deposits: Vec<Deposit>) -> Result<List<SSZDeposit, { config::MAX_DEPOSITS }>, MerkleizationError> {
     let mut deposits_dev = Vec::new();
 
@@ -263,6 +239,30 @@ pub fn hash_tree_root<T: SimpleSerializeTrait>(mut object: T) -> Result<[u8; 32]
     match object.hash_tree_root() {
         Ok(node)=> node.as_bytes().try_into().map_err(|_| MerkleizationError::HashTreeRootInvalidBytes),
         Err(_e) => Err(MerkleizationError::HashTreeRootError)
+    }
+}
+
+impl TryFrom<Deposit> for SSZDeposit {
+    type Error = MerkleizationError;
+
+    fn try_from(value: Deposit) -> Result<Self, Self::Error> {
+        let mut proofs = Vec::new();
+
+        for proof in value.proof.iter() {
+            proofs.push(proof.as_bytes().try_into().map_err(|_| MerkleizationError::InvalidLength)?,)
+        }
+
+        let proofs_conv = Vector::<[u8; 32], {config::DEPOSIT_CONTRACT_TREE_DEPTH + 1}>::from_iter(proofs);
+
+        return Ok(SSZDeposit{
+            proof: proofs_conv,
+            data: SSZDepositData {
+                pubkey: Vector::<u8, 48>::from_iter(value.data.pubkey.clone()),
+                withdrawal_credentials: value.data.withdrawal_credentials.as_bytes().try_into().map_err(|_| MerkleizationError::InvalidLength)?,
+                amount: value.data.amount,
+                signature: Vector::<u8, 96>::from_iter(value.data.signature.clone()),
+            }
+        })
     }
 }
 
